@@ -46,6 +46,7 @@ STATES = {
     "PROFILE_FIRST_GENERATED": "角色信息已生成",
     "PROFILE_GENERATED_IMAGE_GUIDING": "角色信息已生成-引导生图",
     "BOTH_COMPLETED": "两者都完成",
+    "CHAT_MODE": "聊天模式",
     "CREATING": "创建中",
     "COMPLETED": "创建完成"
 }
@@ -238,7 +239,8 @@ def generate_image_from_description():
         
         st.session_state.image_url = image_url
         st.session_state.image_generated = True
-        st.session_state.show_image_button = False
+        # 不隐藏按钮，让它常驻
+        # st.session_state.show_image_button = False
         
         # 更新状态
         if st.session_state.user_preference == "image_first":
@@ -359,7 +361,8 @@ def generate_profile_from_conversation():
         profile_data = json.loads(json_str)
         st.session_state.profile_data = profile_data
         st.session_state.profile_generated = True
-        st.session_state.show_profile_button = False
+        # 不隐藏按钮，让它常驻
+        # st.session_state.show_profile_button = False
         
         # 更新状态
         if st.session_state.user_preference == "profile_first":
@@ -461,19 +464,130 @@ def update_button_visibility():
         not st.session_state.image_generated):
         st.session_state.show_image_button = True
     
-    # 确认按钮：两个都完成后显示
+    # 两个都完成后，自动进入聊天模式
     if st.session_state.image_generated and st.session_state.profile_generated:
-        st.session_state.show_confirm_button = True
-        st.session_state.state = "BOTH_COMPLETED"
+        st.session_state.state = "CHAT_MODE"
+        st.session_state.show_image_button = False
+        st.session_state.show_profile_button = False
+
+
+def chat_with_character():
+    """和角色聊天界面"""
+    st.title("💬 和角色聊天")
+    
+    # 初始化聊天历史
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+        
+        # 添加角色的开场白
+        if st.session_state.profile_data:
+            first_msg = st.session_state.profile_data.get("FirstMsg", "你好！很高兴认识你~")
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": first_msg
+            })
+    
+    # 侧边栏显示角色信息
+    with st.sidebar:
+        st.markdown("### 🎭 角色信息")
+        
+        if st.session_state.image_url:
+            st.image(st.session_state.image_url, use_column_width=True)
+        
+        if st.session_state.profile_data:
+            st.markdown(f"**{st.session_state.profile_data.get('Name', '未命名角色')}**")
+            st.caption(st.session_state.profile_data.get('Evaluation', ''))
+            
+            with st.expander("📋 查看完整信息"):
+                st.json(st.session_state.profile_data)
+        
+        st.markdown("---")
+        
+        # 导出和重置按钮
+        if st.session_state.profile_data:
+            json_str = json.dumps(st.session_state.profile_data, ensure_ascii=False, indent=2)
+            st.download_button(
+                label="📥 下载角色信息",
+                data=json_str,
+                file_name=f"{st.session_state.profile_data.get('Name', 'character')}.json",
+                mime="application/json",
+                use_column_width=True
+            )
+        
+        if st.button("🔄 创建新角色", use_column_width=True):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # 显示聊天历史
+    st.markdown("---")
+    
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            with st.chat_message("user", avatar="😊"):
+                st.markdown(msg["content"])
+        else:
+            with st.chat_message("assistant", avatar="🎭"):
+                st.markdown(msg["content"])
+    
+    # 用户输入
+    user_input = st.chat_input(f"和 {st.session_state.profile_data.get('Name', '角色')} 说点什么...")
+    
+    if user_input:
+        # 添加用户消息
+        st.session_state.chat_history.append({
+            "role": "user",
+            "content": user_input
+        })
+        
+        # 显示用户消息
+        with st.chat_message("user", avatar="😊"):
+            st.markdown(user_input)
+        
+        # 构建角色的 system prompt
+        character_name = st.session_state.profile_data.get('Name', '角色')
+        character_intro = st.session_state.profile_data.get('Intro', '')
+        dialog_example = st.session_state.profile_data.get('DialogExample', '')
+        
+        system_prompt = f"""你现在要扮演 {character_name}。
+
+角色设定：
+{character_intro}
+
+说话风格示例：
+{dialog_example}
+
+请严格按照角色设定和说话风格回复，保持角色的性格特点。
+"""
+        
+        # 构建消息列表（只保留最近10轮对话）
+        recent_history = st.session_state.chat_history[-20:]  # 最近10轮
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(recent_history)
+        
+        # 流式显示角色回复
+        with st.chat_message("assistant", avatar="🎭"):
+            message_placeholder = st.empty()
+            full_response = ""
+            
+            # 流式获取回复
+            for chunk in stream_llm_response(messages, temperature=0.9):
+                full_response += chunk
+                message_placeholder.markdown(full_response + "▌")
+            
+            message_placeholder.markdown(full_response)
+        
+        # 添加角色回复到历史
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": full_response
+        })
+        
+        st.rerun()
 
 
 def finalize_character():
-    """最终创建角色"""
-    st.session_state.state = "CREATING"
-    
-    with st.spinner("✨ 正在创建你的专属角色..."):
-        time.sleep(3)  # 模拟创建过程
-    
+    """最终创建角色（已弃用，现在直接进入聊天模式）"""
     st.session_state.state = "COMPLETED"
     st.success("🎉 恭喜！你的角色创建完成了！")
     
@@ -593,6 +707,11 @@ def main():
     # 主界面
     st.title("🎨 AI 角色创建助手")
     st.caption("让我们一起创建一个独特的 AI 陪伴角色吧！")
+    
+    # 如果进入聊天模式，显示聊天界面
+    if st.session_state.state == "CHAT_MODE":
+        chat_with_character()
+        return
     
     # 如果已完成，显示完成界面
     if st.session_state.state == "COMPLETED":
