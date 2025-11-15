@@ -328,9 +328,8 @@ def display_profile_info(profile_data):
 
 
 def generate_profile_from_conversation():
-    """根据对话生成角色信息"""
-    st.info("📝 正在生成角色信息...")
-    
+    """根据对话生成角色信息 - 在对话区流式输出"""
+    # 构建生成提示
     profile_info = st.session_state.collected_info.get("profile_info", {})
     image_description = ""
     
@@ -347,47 +346,67 @@ def generate_profile_from_conversation():
         {"role": "user", "content": prompt}
     ]
     
-    response = call_llm(messages, temperature=0.8)
+    # 添加助手消息占位
+    st.session_state.conversation_history.append({
+        "role": "assistant",
+        "content": "正在生成角色信息...",
+        "generating_profile": True  # 标记为正在生成
+    })
+    
+    # 流式生成
+    full_response = ""
+    for chunk in stream_llm_response(messages, temperature=0.8):
+        full_response += chunk
     
     try:
         # 提取 JSON
-        if "```json" in response:
-            json_str = response.split("```json")[1].split("```")[0].strip()
-        elif "```" in response:
-            json_str = response.split("```")[1].split("```")[0].strip()
+        if "```json" in full_response:
+            json_str = full_response.split("```json")[1].split("```")[0].strip()
+        elif "```" in full_response:
+            json_str = full_response.split("```")[1].split("```")[0].strip()
         else:
-            json_str = response.strip()
+            json_str = full_response.strip()
         
         profile_data = json.loads(json_str)
         st.session_state.profile_data = profile_data
         st.session_state.profile_generated = True
-        # 不隐藏按钮，让它常驻
-        # st.session_state.show_profile_button = False
         
         # 更新状态
         if st.session_state.user_preference == "profile_first":
             st.session_state.state = "PROFILE_GENERATED_IMAGE_GUIDING"
         
-        st.success("✅ 角色信息生成完成！")
-        
-        # 显示生成的角色信息
-        display_profile_info(profile_data)
+        # 格式化显示内容
+        display_content = "✅ **角色信息生成完成！**\n\n"
+        display_content += f"**{profile_data.get('Name', '未命名角色')}**\n\n"
+        display_content += f"📝 **性别**: {profile_data.get('Gender', '未知')}\n\n"
+        display_content += f"⭐ **评价**: {profile_data.get('Evaluation', '')}\n\n"
+        display_content += f"📖 **简介**: {profile_data.get('Intro', '')}\n\n"
+        display_content += f"💬 **开场白**: {profile_data.get('FirstMsg', '')}\n\n"
+        display_content += f"🏷️ **分类**: {', '.join(profile_data.get('Categories', []))}\n\n"
+        display_content += f"🎵 **声音标签**: {', '.join(profile_data.get('SoundTags', []))}\n\n"
+        display_content += f"🎬 **场景**: {profile_data.get('Scene', '')}\n\n"
+        display_content += f"💭 **对话示例**:\n{profile_data.get('DialogExample', '')}\n\n"
         
         # 添加下一步提示
         if st.session_state.user_preference == "profile_first":
-            next_prompt = "角色信息创建完成！🎉 现在我们来为角色生成图像吧~\n\n我可以根据角色信息自动生成图像，或者你想详细描述一下想要的图像效果？"
+            display_content += "\n---\n\n🎨 角色信息创建完成！现在我们来为角色生成图像吧~\n\n我可以根据角色信息自动生成图像，或者你想详细描述一下想要的图像效果？"
         else:
-            next_prompt = "太棒了！角色已经完整了~ 🎉"
+            display_content += "\n---\n\n🎉 太棒了！角色创建完成！\n\n点击下方【确认完成】按钮即可开始和角色聊天~"
         
-        st.session_state.conversation_history.append({
+        # 更新对话历史（替换占位消息）
+        st.session_state.conversation_history[-1] = {
             "role": "assistant",
-            "content": next_prompt
-        })
+            "content": display_content,
+            "has_profile": True
+        }
         
     except Exception as e:
-        st.error(f"生成角色信息失败：{str(e)}")
+        st.session_state.conversation_history[-1] = {
+            "role": "assistant",
+            "content": f"❌ 生成角色信息失败：{str(e)}"
+        }
     
-    st.rerun()
+    return full_response
 
 
 def process_user_input(user_input):
@@ -443,6 +462,7 @@ def update_button_visibility():
     # 先重置所有按钮状态
     st.session_state.show_image_button = False
     st.session_state.show_profile_button = False
+    st.session_state.show_confirm_button = False
     
     # 图像优先流程
     if st.session_state.user_preference == "image_first":
@@ -462,9 +482,9 @@ def update_button_visibility():
         elif st.session_state.profile_generated and not st.session_state.image_generated:
             st.session_state.show_image_button = True
     
-    # 两个都完成后，自动进入聊天模式
+    # 两个都完成后，显示【确认完成】按钮
     if st.session_state.image_generated and st.session_state.profile_generated:
-        st.session_state.state = "CHAT_MODE"
+        st.session_state.show_confirm_button = True
         st.session_state.show_image_button = False
         st.session_state.show_profile_button = False
 
@@ -752,13 +772,44 @@ def main():
                 with cols[1]:
                     if st.session_state.show_profile_button:
                         if st.button("📝 生成角色信息", key=f"btn_profile_{idx}", type="primary"):
-                            generate_profile_from_conversation()
+                            # 流式输出在对话区
+                            with st.chat_message("assistant", avatar="🤖"):
+                                message_placeholder = st.empty()
+                                message_placeholder.markdown("📝 正在生成角色信息...")
+                                
+                                # 生成角色信息
+                                full_response = generate_profile_from_conversation()
+                                
+                                # 显示最终内容
+                                if st.session_state.profile_generated:
+                                    profile_data = st.session_state.profile_data
+                                    display_content = "✅ **角色信息生成完成！**\n\n"
+                                    display_content += f"**{profile_data.get('Name', '未命名角色')}**\n\n"
+                                    display_content += f"📝 **性别**: {profile_data.get('Gender', '未知')}\n\n"
+                                    display_content += f"⭐ **评价**: {profile_data.get('Evaluation', '')}\n\n"
+                                    display_content += f"📖 **简介**: {profile_data.get('Intro', '')}\n\n"
+                                    display_content += f"💬 **开场白**: {profile_data.get('FirstMsg', '')}\n\n"
+                                    display_content += f"🏷️ **分类**: {', '.join(profile_data.get('Categories', []))}\n\n"
+                                    display_content += f"🎵 **声音标签**: {', '.join(profile_data.get('SoundTags', []))}\n\n"
+                                    display_content += f"🎬 **场景**: {profile_data.get('Scene', '')}\n\n"
+                                    display_content += f"💭 **对话示例**:\n{profile_data.get('DialogExample', '')}\n\n"
+                                    
+                                    if st.session_state.user_preference == "profile_first":
+                                        display_content += "\n---\n\n🎨 角色信息创建完成！现在我们来为角色生成图像吧~\n\n我可以根据角色信息自动生成图像，或者你想详细描述一下想要的图像效果？"
+                                    else:
+                                        display_content += "\n---\n\n🎉 太棒了！角色创建完成！\n\n点击下方【确认完成】按钮即可开始和角色聊天~"
+                                    
+                                    message_placeholder.markdown(display_content)
+                            
+                            st.rerun()
                 
-                # 按钮3：确认创建
+                # 按钮3：确认完成
                 with cols[2]:
                     if st.session_state.show_confirm_button:
-                        if st.button("✅ 确认创建", key=f"btn_confirm_{idx}", type="primary"):
-                            finalize_character()
+                        if st.button("✅ 确认完成", key=f"btn_confirm_{idx}", type="primary"):
+                            # 直接进入聊天模式
+                            st.session_state.state = "CHAT_MODE"
+                            st.rerun()
     
     # 用户输入
     st.markdown("---")
