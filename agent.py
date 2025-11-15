@@ -493,6 +493,14 @@ def chat_with_character():
     """和角色聊天界面"""
     st.title("💬 和角色聊天")
     
+    # 检查角色数据是否存在
+    if not st.session_state.get("profile_data"):
+        st.error("❌ 角色数据不完整，请先完成角色创建！")
+        if st.button("🔄 返回创建"):
+            st.session_state.state = "INIT"
+            st.rerun()
+        return
+    
     # 初始化聊天历史
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
@@ -528,11 +536,10 @@ def chat_with_character():
                 label="📥 下载角色信息",
                 data=json_str,
                 file_name=f"{st.session_state.profile_data.get('Name', 'character')}.json",
-                mime="application/json",
-                use_column_width=True
+                mime="application/json"
             )
         
-        if st.button("🔄 创建新角色", use_column_width=True):
+        if st.button("🔄 创建新角色"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
@@ -549,7 +556,8 @@ def chat_with_character():
                 st.markdown(msg["content"])
     
     # 用户输入
-    user_input = st.chat_input(f"和 {st.session_state.profile_data.get('Name', '角色')} 说点什么...")
+    character_name = st.session_state.profile_data.get('Name', '角色') if st.session_state.profile_data else '角色'
+    user_input = st.chat_input(f"和 {character_name} 说点什么...")
     
     if user_input:
         # 添加用户消息
