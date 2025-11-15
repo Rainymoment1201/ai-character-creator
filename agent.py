@@ -440,29 +440,27 @@ def get_assistant_response_stream(user_input):
 
 def update_button_visibility():
     """更新按钮可见性"""
-    # 图像按钮：对话 3 轮后显示
-    if (st.session_state.state == "IMAGE_FIRST_GUIDING" and 
-        st.session_state.turn_count >= 3 and 
-        not st.session_state.image_generated):
-        st.session_state.show_image_button = True
+    # 先重置所有按钮状态
+    st.session_state.show_image_button = False
+    st.session_state.show_profile_button = False
     
-    # 角色信息按钮（图像优先流程）
-    if (st.session_state.state == "IMAGE_GENERATED_PROFILE_GUIDING" and 
-        st.session_state.turn_count_after_image >= 3 and 
-        not st.session_state.profile_generated):
-        st.session_state.show_profile_button = True
+    # 图像优先流程
+    if st.session_state.user_preference == "image_first":
+        # 图像未生成：显示生图按钮
+        if not st.session_state.image_generated and st.session_state.turn_count >= 3:
+            st.session_state.show_image_button = True
+        # 图像已生成，角色信息未生成：显示角色信息按钮
+        elif st.session_state.image_generated and not st.session_state.profile_generated:
+            st.session_state.show_profile_button = True
     
-    # 角色信息按钮（角色信息优先流程）
-    if (st.session_state.state == "PROFILE_FIRST_GUIDING" and 
-        st.session_state.turn_count >= 3 and 
-        not st.session_state.profile_generated):
-        st.session_state.show_profile_button = True
-    
-    # 图像按钮（角色信息优先流程）
-    if (st.session_state.state == "PROFILE_GENERATED_IMAGE_GUIDING" and 
-        st.session_state.turn_count_after_profile >= 3 and 
-        not st.session_state.image_generated):
-        st.session_state.show_image_button = True
+    # 角色信息优先流程
+    elif st.session_state.user_preference == "profile_first":
+        # 角色信息未生成：显示角色信息按钮
+        if not st.session_state.profile_generated and st.session_state.turn_count >= 3:
+            st.session_state.show_profile_button = True
+        # 角色信息已生成，图像未生成：显示生图按钮
+        elif st.session_state.profile_generated and not st.session_state.image_generated:
+            st.session_state.show_image_button = True
     
     # 两个都完成后，自动进入聊天模式
     if st.session_state.image_generated and st.session_state.profile_generated:
